@@ -1,17 +1,29 @@
-from aiogram import Bot, Dispatcher, executor
+from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+
+from crud_functions import *
+
+# БД
+initiate_db()
+products = get_all_products()
 
 
+# Телеграмм-бот
 api = ''
 bot = Bot(token=api)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
+
+# КЛАВИАТУРЫ
 kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text='Информация')],
+        [KeyboardButton(text='Регистрация')],
         [KeyboardButton(text='Рассчитать')],
         [KeyboardButton(text='Купить')]
     ], resize_keyboard=True
@@ -34,6 +46,8 @@ kb3 = InlineKeyboardMarkup(
 )
 
 
+# Работа клавиатур
+# 1. Расчет калорий
 @dp.message_handler(text='Рассчитать')
 async def main_menu(message):
     await message.answer('Выберите опцию:', reply_markup=kb2)
@@ -45,6 +59,7 @@ async def get_formulas(call):
     await call.answer()
 
 
+# 1.1. Класс состояний для расчета нормы калорий
 class UserState(StatesGroup):
     age = State()
     growth = State()
@@ -83,21 +98,67 @@ async def send_calories(message, state):
     await state.finish()
 
 
+# 2. Кнопка начала
 @dp.message_handler(commands=['start'])
 async def start(message):
     await message.answer('Привет! Я бот помогающий твоему здоровью.', reply_markup=kb)
 
 
+# 3. Класс состояний для регистрации
+class RegistrationState(StatesGroup):
+    username = State()
+    email = State()
+    age = State()
+    balance = State()
+
+
+@dp.message_handler(text='Регистрация')
+async def sing_up(message):
+    await message.answer('Введите имя пользователя (только латинский алфавит):')
+    await RegistrationState.username.set()
+
+
+@dp.message_handler(state=RegistrationState.username)
+async def set_username(message, state):
+    if not is_included(message.text):
+        await state.update_data(username=message.text)
+        await message.answer('Введите свой email:')
+        await RegistrationState.email.set()
+    else:
+        await message.answer('Пользователь существует, введите другое имя:')
+        await RegistrationState.username.set()
+
+
+@dp.message_handler(state=RegistrationState.email)
+async def set_email(message, state):
+    await state.update_data(email=message.text)
+    await message.answer('Введите свой возраст:')
+    await RegistrationState.age.set()
+
+
+@dp.message_handler(state=RegistrationState.age)
+async def set_age(message, state):
+    await state.update_data(age=message.text)
+    datauser = await state.get_data()
+    add_user(**datauser)
+    await message.answer('Регистрация прошла успешно!')
+    await state.finish()
+
+
+# 4. Кнопка информации
 @dp.message_handler(text='Информация')
 async def inform(message):
     await message.answer('Это бот, позволяющий рассчитать норму калорий по формуле Миффлина-Сан Жеора для женщин')
 
 
+# 5. Кнопка покупки товара
 @dp.message_handler(text='Купить')
 async def get_buying_list(message):
-    for i in range(1, 5):
-        await message.answer(f"Название: Продукт{i} | Описание: Описание {i} | Цена: {i * 100}")
-        with open(f"img{i}.jpg", "rb") as img:
+    for pr in products:
+        await message.answer(f"Название: {pr[1]} | "
+                             f"Описание: Описание {pr[2]} | "
+                             f"Цена: {pr[3]}")
+        with open(f"img{pr[0]}.jpg", "rb") as img:
             await message.answer_photo(img)
     await message.answer("Выберите продукт для покупки:", reply_markup=kb3)
 
@@ -108,6 +169,7 @@ async def send_confirm_message(call):
     await call.answer()
 
 
+# 6. Кнопка на все остальное
 @dp.message_handler()
 async def all_messages(message):
     await message.answer('Введите команду /start, чтобы начать общение.')
